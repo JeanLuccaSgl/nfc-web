@@ -1,16 +1,23 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI, HTTPException  # Biblioteca para criar a API e tratar exceções HTTP
+from fastapi.responses import RedirectResponse # Biblioteca para redirecionar o usuário para outra URL
 
-from app.database import abrir_conexao
+from app.database import abrir_conexao # Função para abrir a conexão com o banco de dados
 
-app = FastAPI()
+app = FastAPI() # Cria o objeto principal da API. O Uvicorn procura esse objeto quando executamos - python -m uvicorn app.main:app --reload
 
-@app.get("/")
+@app.get("/") # Informa ao FastAPI que a função abaixo será executada quando alguém acessar a rota raiz ("/") da API usando o método GET.
 def inicio():
     return {"mensagem": "API funcionando corretamente."}
 
-@app.get("/q/{codigo}")
-def acessar_qr_code(codigo: str):
+@app.get("/q/{codigo}") # Informa ao FastAPI que a função abaixo será executada quando alguém acessar a rota "/q/{codigo}" da API usando o método GET. O {codigo} é um parâmetro de caminho que será passado para a função acessar_qr_code.
+def acessar_qr_code(codigo: str, source: str = "qr"): # A função recebe o parâmetro codigo, que é uma string representando o código do QR Code que o usuário deseja acessar.
+
+    if source not in ("qr", "nfc"):
+        raise HTTPException(
+            status_code=400,
+            detail="Origem inválida",
+    )
+
     with abrir_conexao() as conexao:
         with conexao.cursor() as cursor:
             cursor.execute(
@@ -34,10 +41,10 @@ def acessar_qr_code(codigo: str):
 
             cursor.execute(
                 """
-                INSERT INTO access_events (qr_code_id)
-                VALUES (%s)
+                INSERT INTO access_events (qr_code_id, source)
+                VALUES (%s, %s)
                 """,
-                (qr_code_id,),
+                (qr_code_id, source),
             )
 
     return RedirectResponse(
