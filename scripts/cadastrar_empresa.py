@@ -1,5 +1,6 @@
-import secrets
+from pathlib import Path
 import qrcode
+import secrets
 
 from app.database import abrir_conexao
 
@@ -40,7 +41,10 @@ with abrir_conexao() as conexao:
         resultado_qr = cursor.fetchone()
         id_qr_code = resultado_qr[0] if resultado_qr else None
 
-nome_arquivo = f"qr_{codigo_qr}.png"
+pasta_qrcodes = Path("qrcodes")
+pasta_qrcodes.mkdir(exist_ok=True)
+
+nome_arquivo = pasta_qrcodes / f"qr_{codigo_qr}.png"
 
 imagem = qrcode.make(url_publica)
 imagem.save(nome_arquivo)

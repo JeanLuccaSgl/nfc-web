@@ -1,9 +1,16 @@
+from pathlib import Path
+
 import qrcode
 
 
 url = "https://nfc-web.onrender.com/q/abc123"
 
-imagem = qrcode.make(url)
-imagem.save("qr_abc123.png")
+pasta_qrcodes = Path("qrcodes")
+pasta_qrcodes.mkdir(exist_ok=True)
 
-print("QR Code criado com sucesso.")
+nome_arquivo = pasta_qrcodes / "qr_abc123.png"
+
+imagem = qrcode.make(url)
+imagem.save(nome_arquivo)
+
+print(f"QR Code criado com sucesso: {nome_arquivo}")
