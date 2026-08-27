@@ -3,6 +3,10 @@ import os
 DATABASE_URL = os.environ["DATABASE_URL"]
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_PUBLISHABLE_KEY = os.environ.get("SUPABASE_PUBLISHABLE_KEY", "")
+PUBLIC_BASE_URL = os.environ.get(
+    "PUBLIC_BASE_URL",
+    "https://nfc-web.onrender.com",
+).rstrip("/")
 CORS_ORIGINS = [
     origem.strip()
     for origem in os.environ.get(

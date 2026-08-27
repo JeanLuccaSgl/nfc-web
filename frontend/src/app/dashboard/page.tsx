@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { supabase } from "@/lib/supabase";
@@ -32,6 +32,18 @@ type DashboardData = {
   }>;
 };
 
+type DashboardRole = "admin" | "client";
+
+type EstablishmentOption = {
+  id: number;
+  nome: string;
+};
+
+type EstablishmentsResponse = {
+  role: DashboardRole;
+  empresas: EstablishmentOption[];
+};
+
 const apiUrl = process.env.NEXT_PUBLIC_API_URL;
 
 function formatarData(data: string | null) {
@@ -43,14 +55,137 @@ function formatarData(data: string | null) {
   }).format(new Date(data));
 }
 
+async function obterDetalheErro(resposta: Response) {
+  let detalhe = `Erro HTTP ${resposta.status}`;
+
+  try {
+    const corpo = await resposta.json();
+
+    if (typeof corpo.detail === "string") {
+      detalhe = corpo.detail;
+    }
+  } catch {
+    // Mantém o status HTTP quando a API não retorna JSON.
+  }
+
+  return detalhe;
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const [dados, setDados] = useState<DashboardData | null>(null);
   const [erro, setErro] = useState("");
   const [carregando, setCarregando] = useState(true);
+  const [role, setRole] = useState<DashboardRole | null>(null);
+  const [establishments, setEstablishments] = useState<EstablishmentOption[]>([]);
+  const [selectedEstablishmentId, setSelectedEstablishmentId] = useState("");
+
+  const buscarOverview = useCallback(
+    async (accessToken: string, establishmentId: number) => {
+      const resposta = await fetch(
+        `${apiUrl}/dashboard/overview?establishment_id=${establishmentId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        },
+      );
+
+      if (resposta.status === 401) {
+        await supabase.auth.signOut();
+        router.replace("/");
+        return null;
+      }
+
+      if (!resposta.ok) {
+        throw new Error(await obterDetalheErro(resposta));
+      }
+
+      return (await resposta.json()) as DashboardData;
+    },
+    [router],
+  );
 
   useEffect(() => {
+    let componenteAtivo = true;
+
     async function carregarDashboard() {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session) {
+          router.replace("/");
+          return;
+        }
+
+        if (!apiUrl) {
+          throw new Error("A URL da API não foi configurada.");
+        }
+
+        const respostaEmpresas = await fetch(`${apiUrl}/dashboard/establishments`, {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
+
+        if (respostaEmpresas.status === 401) {
+          await supabase.auth.signOut();
+          router.replace("/");
+          return;
+        }
+
+        if (!respostaEmpresas.ok) {
+          throw new Error(await obterDetalheErro(respostaEmpresas));
+        }
+
+        const acesso = (await respostaEmpresas.json()) as EstablishmentsResponse;
+        const primeiraEmpresa = acesso.empresas[0];
+
+        if (!primeiraEmpresa) {
+          throw new Error("Nenhuma empresa disponível para este usuário.");
+        }
+
+        const dadosDashboard = await buscarOverview(
+          session.access_token,
+          primeiraEmpresa.id,
+        );
+
+        if (!componenteAtivo || !dadosDashboard) return;
+
+        setRole(acesso.role);
+        setEstablishments(acesso.empresas);
+        setSelectedEstablishmentId(String(primeiraEmpresa.id));
+        setDados(dadosDashboard);
+        setErro("");
+      } catch (error) {
+        if (componenteAtivo) {
+          setErro(
+            error instanceof Error
+              ? error.message
+              : "Não foi possível conectar ao backend.",
+          );
+        }
+      } finally {
+        if (componenteAtivo) setCarregando(false);
+      }
+    }
+
+    carregarDashboard();
+
+    return () => {
+      componenteAtivo = false;
+    };
+  }, [buscarOverview, router]);
+
+  async function trocarEmpresa(event: React.ChangeEvent<HTMLSelectElement>) {
+    const establishmentId = Number(event.target.value);
+    setSelectedEstablishmentId(event.target.value);
+    setCarregando(true);
+    setErro("");
+
+    try {
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -60,39 +195,22 @@ export default function DashboardPage() {
         return;
       }
 
-      if (!apiUrl) {
-        setErro("A URL da API não foi configurada.");
-        setCarregando(false);
-        return;
-      }
+      const dadosDashboard = await buscarOverview(
+        session.access_token,
+        establishmentId,
+      );
 
-      const resposta = await fetch(`${apiUrl}/dashboard/overview`, {
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-      });
-
-      if (resposta.status === 401) {
-        await supabase.auth.signOut();
-        router.replace("/");
-        return;
-      }
-
-      if (!resposta.ok) {
-        setErro("Não foi possível carregar os dados do dashboard.");
-        setCarregando(false);
-        return;
-      }
-
-      setDados(await resposta.json());
+      if (dadosDashboard) setDados(dadosDashboard);
+    } catch (error) {
+      setErro(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível carregar a empresa.",
+      );
+    } finally {
       setCarregando(false);
     }
-
-    carregarDashboard().catch(() => {
-      setErro("Não foi possível conectar ao backend.");
-      setCarregando(false);
-    });
-  }, [router]);
+  }
 
   async function sair() {
     await supabase.auth.signOut();
@@ -122,11 +240,19 @@ export default function DashboardPage() {
           <span>NFC</span>
         </div>
 
-        <div className={styles.headerActions}>
-          <span className={styles.clientName}>{dados.empresa.nome}</span>
-          <button className={styles.logoutButton} onClick={sair}>
-            Sair
-          </button>
+          <div className={styles.headerActions}>
+            <span className={styles.clientName}>{dados.empresa.nome}</span>
+            {role === "admin" && (
+              <button
+                className={styles.adminButton}
+                onClick={() => router.push("/admin")}
+              >
+                Painel admin
+              </button>
+            )}
+            <button className={styles.logoutButton} onClick={sair}>
+              Sair
+            </button>
         </div>
       </header>
 
@@ -137,7 +263,24 @@ export default function DashboardPage() {
             <h1>Olá, {dados.empresa.nome}.</h1>
             <p>Acompanhe como seus clientes estão chegando à avaliação.</p>
           </div>
-          <span className={styles.liveStatus}>● Dados atualizados</span>
+          <div className={styles.headingActions}>
+            {role === "admin" && (
+              <label className={styles.companySelector}>
+                <span>Visualizando empresa</span>
+                <select
+                  value={selectedEstablishmentId}
+                  onChange={trocarEmpresa}
+                >
+                  {establishments.map((establishment) => (
+                    <option key={establishment.id} value={establishment.id}>
+                      {establishment.nome}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <span className={styles.liveStatus}>● Dados atualizados</span>
+          </div>
         </div>
 
         <section className={styles.metrics} aria-label="Resumo de acessos">
